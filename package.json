@@ -1,0 +1,22 @@
+{
+  "name": "meet-mate",
+  "version": "1.0.0",
+  "main": "index.js",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "web": "npm run dev --workspace=web",
+    "sfu-server": "npm run dev --workspace=sfu-server",
+    "start": "npm-run-all --parallel web sfu-server"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "description": "",
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}

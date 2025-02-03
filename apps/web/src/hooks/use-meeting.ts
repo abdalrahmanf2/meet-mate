@@ -1,13 +1,12 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import { RtpCapabilities } from "mediasoup-client/lib/RtpParameters";
 
 const useMeeting = (meetingId: string) => {
-  const [videoTrack, setVideoTrack] = useState<MediaStream | null>(null);
-
   useEffect(() => {
     const socket = io("http://localhost:3001", {
       query: {
@@ -23,21 +22,58 @@ const useMeeting = (meetingId: string) => {
 
     socket.on(
       "meeting:rtp-capabilities",
-      (rtpCapabilities: RtpCapabilities) => {
-        // if the device isn't loaded, load it.
-        if (!device.loaded) {
-          device.load({ routerRtpCapabilities: rtpCapabilities });
-        }
+      async (rtpCapabilities: RtpCapabilities) => {
+        try {
+          // if the device isn't loaded, load it.
+          if (!device.loaded) {
+            await device.load({ routerRtpCapabilities: rtpCapabilities });
+          }
 
-        // Signal to the server for creating a send media transport.
-        socket.emit("meetings:create-send-transport");
+          // Signal to the server that the device is ready and loaded
+          socket.emit("meeting:device-ready");
+        } catch (error) {
+          console.error("Error loading device:", error);
+        }
       }
     );
 
-    return () => {};
-  }, [meetingId]);
+    socket.on("meeting:establish-conn", async () => {
+      try {
+        // Send Transport
+        const sendTransportOptions = await socket.emitWithAck(
+          "meeting:create-transport"
+        );
+        const sendTransport = device.createSendTransport(sendTransportOptions);
 
-  return { videoTrack };
+        // Subscribe to connect and produce events
+        sendTransport.on("connect", ({ dtlsParameters }, cb, errback) => {
+          console.log(dtlsParameters);
+        });
+        sendTransport.on("produce", () => console.log("producing"));
+
+        // const producer = sendTransport.produce();
+
+        // Recieve Transport
+        const recieveTransportOptions = await socket.emitWithAck(
+          "meeting:create-transport"
+        );
+        const recvTransport = device.createRecvTransport(
+          recieveTransportOptions
+        );
+
+        // Subscribe to connect event
+        recvTransport.on("connect", ({ dtlsParameters }, cb, errback) => {
+          console.log(dtlsParameters);
+        });
+      } catch (error) {
+        console.error("Error establishing a connection:", error);
+      }
+    });
+
+    return () => {};
+  }, []);
+
+  return {};
 };
 
 export default useMeeting;

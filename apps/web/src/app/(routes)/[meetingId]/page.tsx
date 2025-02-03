@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import MeetingApp from "./_components/meeting";
+import MeetingApp from "./_components/meeting-app";
 import { redirect } from "next/navigation";
 import NotFound from "@/app/not-found";
 import { meetingExist } from "@/data/meetings";

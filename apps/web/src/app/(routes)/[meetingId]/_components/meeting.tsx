@@ -6,7 +6,7 @@ import Controlls from "./controls";
 import ParticipantsGrid from "./participants-grid";
 import useMeeting from "@/hooks/use-meeting";
 
-const MeetingApp = () => {
+const Meeting = () => {
   const { meetingId } = useParams();
   useMeeting(meetingId as string);
 
@@ -21,4 +21,4 @@ const MeetingApp = () => {
   );
 };
 
-export default MeetingApp;
+export default Meeting;

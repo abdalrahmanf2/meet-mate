@@ -25,7 +25,7 @@ const MeetingCard = () => {
       <CardFooter>
         <Button disabled className="font-semibold ml-auto" size="sm">
           <Copy />
-          Copy Meeting&apos;s Link
+          {"Copy Meeting's Link"}
         </Button>
       </CardFooter>
     </Card>

@@ -11,11 +11,11 @@ const MeetingLayout = ({ children }: PropsWithChildren) => {
         <Navbar />
       </header>
       <main className="p-4">
-        <MeetingStoreProvider>
-          <QueryProvider>
+        <QueryProvider>
+          <MeetingStoreProvider>
             <SessionProvider>{children}</SessionProvider>
-          </QueryProvider>
-        </MeetingStoreProvider>
+          </MeetingStoreProvider>
+        </QueryProvider>
       </main>
     </>
   );

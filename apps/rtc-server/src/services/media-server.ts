@@ -2,7 +2,7 @@ import { createWorker } from "mediasoup";
 import type { Router, Worker } from "mediasoup/node/lib/types.js";
 import os from "os";
 import { routerConfig, workerConfig } from "../config/mediasoup.ts";
-import { meetingHandler, meetings } from "../sockets/meeting.ts";
+import { meetings } from "../sockets/meeting.ts";
 import type { RouterAppData, WorkerAppData } from "../types/media-types.ts";
 
 export const workers: Worker<WorkerAppData>[] = [];
@@ -23,7 +23,7 @@ export const createMediaWorkers = async () => {
 /**
  * Gets the next worker that the next router AKA Conferencing Room should be created on.
  */
-const getLeastLoadedWorker = () => {
+export const getLeastLoadedWorker = () => {
   let leastLoadedWorker = workers[0];
 
   for (const worker of workers) {

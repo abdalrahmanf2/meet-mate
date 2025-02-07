@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import useDeviceManager from "@/hooks/use-device-manager";
 import { cn } from "@/lib/utils";
 import { useMeetingStore } from "@/providers/meeting-store-provider";
 import {
@@ -26,82 +27,66 @@ import {
   Video,
   VideoOff,
 } from "lucide-react";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 const MeetingSetup = () => {
+  const { audioDevices, videoDevices, initializeDevices, changeDevice, error } =
+    useDeviceManager();
+
   const previewRef = useRef<HTMLVideoElement>(null);
   const [isPending, startTransition] = useTransition();
-  const [isError, setIsError] = useState(false);
 
-  const [mediaStream, setMediaStream] = useState<MediaStream>();
-  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>();
-  const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>();
+  const [audioInputId, setAudioInputId] = useState<string>();
+  const [videoInputId, setVideoInputId] = useState<string>();
 
-  const [audioInputId, setAudioInputId] = useState("");
-  const [videoInputId, setVideoInputId] = useState("");
+  const isThereAudioDevices = useMemo(
+    () => audioDevices.length > 0,
+    [audioDevices]
+  );
+  const isThereVideoDevices = useMemo(
+    () => videoDevices.length > 0,
+    [videoDevices]
+  );
 
-  // Mic
-  const isMuted = useMeetingStore((state) => state.isMuted);
-  const toggleMute = useMeetingStore((state) => state.toggleMute);
-
-  // Cam
-  const isCamEnable = useMeetingStore((state) => state.isCamEnabled);
-  const toggleCam = useMeetingStore((state) => state.toggleCam);
+  const { mediaStream, ready, isMuted, toggleMute, isCamEnabled, toggleCam } =
+    useMeetingStore((state) => state);
 
   useEffect(() => {
     startTransition(async () => {
-      try {
-        const userStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        });
-        setMediaStream(userStream);
-
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        setAudioInputs(
-          devices.filter((device) => device.kind === "audioinput")
-        );
-        setVideoInputs(
-          devices.filter((device) => device.kind === "videoinput")
-        );
-
-        if (previewRef.current) {
-          previewRef.current.srcObject = userStream;
-        }
-      } catch {
-        setIsError(true);
-      }
+      await initializeDevices();
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (previewRef.current) {
-      previewRef.current.srcObject = mediaStream!;
-    }
+    mediaStream?.getTracks().map((track) => {
+      if (track.kind === "audio") {
+        setAudioInputId(track.getSettings().deviceId);
+      }
+
+      if (track.kind === "video") {
+        setVideoInputId(track.getSettings().deviceId);
+        if (previewRef.current) {
+          previewRef.current.srcObject = mediaStream!;
+        }
+      }
+    });
   }, [mediaStream]);
 
   useEffect(() => {
     (async () => {
-      try {
-        const userStream = await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: audioInputId },
-          video: { deviceId: videoInputId },
-        });
-
-        setMediaStream(userStream);
-      } catch {
-        setIsError(true);
-      }
+      await changeDevice(audioInputId, videoInputId);
     })();
-  }, [audioInputId, videoInputId]);
+  }, [audioInputId, videoInputId, changeDevice]);
 
-  if (isPending || isError) {
+  if (isPending || error) {
     return (
-      <div className="min-h-[75vh] flex items-center justify-center">
+      <div className="min-h-[75vh] text-center flex items-center justify-center">
         <h1 className="text-muted-foreground text-2xl font-semibold">
           <Video className="m-auto size-20" />
           Please allow access to your media devices!
         </h1>
+        <p className="text-red-400">{error}</p>
       </div>
     );
   }
@@ -113,6 +98,7 @@ const MeetingSetup = () => {
           <CardTitle className="text-xl">Meeting Setup</CardTitle>
         </CardHeader>
         <CardContent className="grid items-center gap-8 md:grid-cols-2">
+          {/* Camera Settings */}
           <AspectRatio
             ratio={16 / 9}
             className="relative bg-muted rounded-lg overflow-hidden"
@@ -123,12 +109,12 @@ const MeetingSetup = () => {
               playsInline
               className={cn(
                 "absolute top-1/2 left-1/2 -translate-y-1/2 -translate-x-1/2",
-                !isCamEnable && "hidden"
+                !isCamEnabled && "hidden"
               )}
               ref={previewRef}
             />
 
-            {!isCamEnable && (
+            {!isCamEnabled && (
               <div className="absolute top-1/2 left-1/2 -translate-y-1/2 -translate-x-1/2">
                 <div className="size-full text-muted-foreground flex flex-col items-center gap-2">
                   <CameraOff />
@@ -143,10 +129,10 @@ const MeetingSetup = () => {
                 <div
                   className={cn(
                     "flex items-center gap-2",
-                    !isCamEnable && "opacity-50"
+                    !isCamEnabled && "opacity-50"
                   )}
                 >
-                  {isCamEnable ? (
+                  {isCamEnabled ? (
                     <Video className="size-5" />
                   ) : (
                     <VideoOff className="size-5" />
@@ -155,11 +141,15 @@ const MeetingSetup = () => {
                 </div>
                 <Switch
                   className="opacity-100"
-                  checked={isCamEnable}
+                  checked={isCamEnabled}
                   onCheckedChange={toggleCam}
                 />
               </div>
-              <Select value={videoInputId} onValueChange={setVideoInputId}>
+              <Select
+                disabled={!isThereVideoDevices}
+                value={videoInputId}
+                onValueChange={setVideoInputId}
+              >
                 <SelectTrigger>
                   <div className="text-isMuted-foreground flex items-center gap-2">
                     <CameraIcon className="size-4" />
@@ -167,7 +157,7 @@ const MeetingSetup = () => {
                   </div>
                 </SelectTrigger>
                 <SelectContent>
-                  {videoInputs?.map((input) => (
+                  {videoDevices?.map((input) => (
                     <SelectItem key={input.deviceId} value={input.deviceId}>
                       {input.label}
                     </SelectItem>
@@ -176,6 +166,7 @@ const MeetingSetup = () => {
               </Select>
             </div>
 
+            {/* Microphone Settings */}
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <div
@@ -197,7 +188,11 @@ const MeetingSetup = () => {
                   onCheckedChange={toggleMute}
                 />
               </div>
-              <Select value={audioInputId} onValueChange={setAudioInputId}>
+              <Select
+                disabled={!isThereAudioDevices}
+                value={audioInputId}
+                onValueChange={setAudioInputId}
+              >
                 <SelectTrigger>
                   <div className="text-isMuted-foreground flex items-center gap-2">
                     <MicVocal className="size-4" />
@@ -205,7 +200,7 @@ const MeetingSetup = () => {
                   </div>
                 </SelectTrigger>
                 <SelectContent>
-                  {audioInputs?.map((input) => (
+                  {audioDevices?.map((input) => (
                     <SelectItem key={input.deviceId} value={input.deviceId}>
                       {input.label}
                     </SelectItem>
@@ -216,7 +211,7 @@ const MeetingSetup = () => {
           </div>
         </CardContent>
         <CardFooter className="justify-end">
-          <Button>Join Meeting</Button>
+          <Button onClick={ready}>Join Meeting</Button>
         </CardFooter>
       </Card>
     </div>

@@ -32,7 +32,7 @@ const DashboardSidebar = ({ className }: DashboardSidebarProps) => {
   const path = usePathname();
 
   return (
-    <aside className={cn("flex md:flex-col gap-2", className)}>
+    <aside className={cn("flex md:flex-col gap-4", className)}>
       {SIDEBAR_ITEMS.map((item) => (
         <Link
           key={item.name}
@@ -40,6 +40,7 @@ const DashboardSidebar = ({ className }: DashboardSidebarProps) => {
           className={cn(
             buttonVariants({
               variant: path === item.url ? "secondary" : "ghost",
+              size: "lg",
             }),
             "flex-1 md:flex-none md:justify-start font-semibold",
             path !== item.url && "text-muted-foreground"

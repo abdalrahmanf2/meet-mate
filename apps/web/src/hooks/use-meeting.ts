@@ -5,8 +5,12 @@ import { useEffect } from "react";
 import { io } from "socket.io-client";
 import { Device } from "mediasoup-client";
 import { RtpCapabilities } from "mediasoup-client/lib/RtpParameters";
+import { useMeetingStore } from "@/providers/meeting-store-provider";
 
 const useMeeting = (meetingId: string) => {
+  const userMedia = useMeetingStore((state) => state.mediaStream);
+
+  // on joining the meeting
   useEffect(() => {
     const socket = io("http://localhost:3001", {
       query: {
@@ -41,25 +45,48 @@ const useMeeting = (meetingId: string) => {
       try {
         // Send Transport
         const sendTransportOptions = await socket.emitWithAck(
-          "meeting:create-transport"
+          "meeting:create-transport",
+          { type: "send" }
         );
+        if (!sendTransportOptions) {
+          throw new Error("Couldn't get send tranport options");
+        }
         const sendTransport = device.createSendTransport(sendTransportOptions);
-
-        // Subscribe to connect and produce events
-        sendTransport.on("connect", ({ dtlsParameters }, cb, errback) => {
-          console.log(dtlsParameters);
-        });
-        sendTransport.on("produce", () => console.log("producing"));
-
-        // const producer = sendTransport.produce();
 
         // Recieve Transport
         const recieveTransportOptions = await socket.emitWithAck(
-          "meeting:create-transport"
+          "meeting:create-transport",
+          { type: "recieve" }
         );
+        if (!recieveTransportOptions) {
+          throw new Error("Couldn't get recieve tranport options");
+        }
         const recvTransport = device.createRecvTransport(
           recieveTransportOptions
         );
+
+        // Subscribe to connect and produce events
+        sendTransport.on("connect", async ({ dtlsParameters }, cb, errback) => {
+          try {
+            const success = await socket.emitWithAck("meeting:connect-trans", {
+              dtlsParameters,
+              type: "send",
+            });
+
+            if (!success) {
+              throw new Error("Couldn't connect to the server");
+            }
+
+            cb();
+          } catch (e) {
+            errback(e as Error);
+          }
+        });
+        sendTransport.on("produce", () => console.log("producing"));
+
+        const producer = sendTransport.produce({
+          track: userMedia?.getTracks()[0] as MediaStreamTrack,
+        });
 
         // Subscribe to connect event
         recvTransport.on("connect", ({ dtlsParameters }, cb, errback) => {

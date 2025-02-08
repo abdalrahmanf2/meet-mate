@@ -6,10 +6,9 @@ import type {
 import type { RouterAppData, WorkerAppData } from "../types/media-types.ts";
 
 export const workerConfig: WorkerSettings<WorkerAppData> = {
-  rtcMinPort: 10000,
-  rtcMaxPort: 10100,
-  logLevel: "warn",
-  logTags: ["info", "ice", "dtls", "rtp", "srtp", "rtcp"],
+  logLevel: "debug",
+  rtcMinPort: 40000,
+  rtcMaxPort: 49999,
   appData: {
     load: 0,
   },
@@ -38,17 +37,13 @@ export const routerConfig: RouterOptions<RouterAppData> = {
 };
 
 export const webRtcTransportConfig: WebRtcTransportOptions = {
-  enableUdp: true,
-  enableTcp: true,
-  preferUdp: true,
-  listenInfos: [
+  listenIps: [
     {
-      ip: "127.0.0.1",
-      protocol: "udp",
-    },
-    {
-      ip: "127.0.0.1",
-      protocol: "tcp",
+      ip: process.env.MEDIASOUP_LISTEN_IP || "192.168.1.103",
+      announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP,
     },
   ],
+  enableUdp: true, // Enable UDP (required)
+  enableTcp: true, // Enable TCP (optional, but recommended)
+  preferUdp: true, // Prefer UDP over TCP
 };

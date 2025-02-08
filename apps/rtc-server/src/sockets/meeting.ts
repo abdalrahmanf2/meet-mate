@@ -1,34 +1,71 @@
-import type { Router, Worker } from "mediasoup/node/lib/types.js";
-import type { RouterAppData, WorkerAppData } from "../types/media-types.ts";
-import { getRouter } from "../services/media-server.ts";
+import { getLeastLoadedWorker } from "../services/media-server.ts";
 import type { Server, Socket } from "socket.io";
-import { webRtcTransportConfig } from "../config/mediasoup.ts";
-import type { TransportOptions } from "mediasoup-client/lib/types.js";
 import Meeting from "../models/Meeting.ts";
+import { routerConfig } from "../config/mediasoup.ts";
+import type { Router } from "mediasoup/node/lib/types.js";
+import type { RouterAppData } from "../types/media-types.ts";
 
-export const meetings = new Map<
-  string,
-  { worker: Worker<WorkerAppData>; router: Router<RouterAppData> }
->();
+export const meetings = new Map<string, Meeting>();
 
 export const meetingHandler = async (io: Server, socket: Socket) => {
   const meetingId = socket.handshake.query.meetingId as string;
-  const router = (await getRouter(meetingId)).router;
-  const meeting = new Meeting(router);
+  const userId = socket.handshake.query.userId as string;
 
-  const onJoinMeeting = async (meetingId: string) => {
-    socket.emit("meeting:rtp-capabilities", router.rtpCapabilities);
+  const meeting = await getMeeting(userId, meetingId);
+
+  const onJoinMeeting = async () => {
+    // Joins the room of sockets related to that meeting
+    socket.join(meetingId);
+
+    // Notify all clients that a new client has joined
+    socket.to(meetingId).emit("meeting:new-client-joined");
+
+    const deviceRtpCaps = await socket.emitWithAck(
+      "meeting:rtp-capabilities",
+      meeting.router.rtpCapabilities
+    );
 
     // Add the new client that just has joined
-    meeting.addClient(socket);
-  };
+    meeting.addClient(userId, deviceRtpCaps, socket);
 
-  const onDeviceReady = async () => {
     socket.emit("meeting:establish-conn");
   };
 
-  const onConnectWebRTCTrans = async (ack: (e: string) => void) => {};
+  const leaveMeeting = () => {
+    console.log("SOMEONE LEFT");
+    meeting.cleanup(userId);
+
+    if (meeting.clientsCount === 0) {
+      console.log("MEETING IS EMPTY");
+      // meetings.delete(meetingId);
+    }
+
+    // Notify other clients about the disconnection
+    socket.to(meetingId).emit("meeting:client-disconnected", socket.id);
+  };
 
   socket.on("meeting:join", onJoinMeeting);
-  socket.on("meeting:device-ready", onDeviceReady);
+  socket.on("disconnect", leaveMeeting);
+};
+
+/**
+ * Gets the meeting from the map otherwise it creates a new meeting instance.
+ */
+const getMeeting = async (userId: string, meetingId: string) => {
+  if (meetings.has(meetingId)) {
+    console.log("MEETING EXIST");
+    return meetings.get(meetingId) as Meeting;
+  }
+
+  const worker = getLeastLoadedWorker();
+  const router = (await worker.createRouter(
+    routerConfig
+  )) as Router<RouterAppData>;
+
+  worker.appData.load++;
+
+  const meeting = new Meeting(userId, worker, router);
+  meetings.set(meetingId, meeting);
+
+  return meeting;
 };

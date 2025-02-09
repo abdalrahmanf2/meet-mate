@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { Server } from "socket.io";
 import { PORT } from "./config/index.ts";
-import { createMediaWorkers } from "./services/media-server.ts";
+import { createMediaWorkers } from "./services/media-soup.ts";
 import { onConnection } from "./sockets/connection.ts";
 
 // Hono App

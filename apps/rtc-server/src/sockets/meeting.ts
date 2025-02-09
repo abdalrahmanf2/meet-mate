@@ -1,4 +1,4 @@
-import { getLeastLoadedWorker } from "../services/media-server.ts";
+import { getLeastLoadedWorker } from "../services/media-soup.ts";
 import type { Server, Socket } from "socket.io";
 import Meeting from "../models/Meeting.ts";
 import { routerConfig } from "../config/mediasoup.ts";
@@ -11,14 +11,14 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
   const meetingId = socket.handshake.query.meetingId as string;
   const userId = socket.handshake.query.userId as string;
 
-  const meeting = await getMeeting(userId, meetingId);
+  const meeting = await getMeeting(meetingId);
 
   const onJoinMeeting = async () => {
     // Joins the room of sockets related to that meeting
     socket.join(meetingId);
 
     // Notify all clients that a new client has joined
-    socket.to(meetingId).emit("meeting:new-client-joined");
+    socket.to(meetingId).emit("meeting:new-client-joined", () => {});
 
     const deviceRtpCaps = await socket.emitWithAck(
       "meeting:rtp-capabilities",
@@ -26,6 +26,7 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     );
 
     // Add the new client that just has joined
+    console.log("USER ID", userId);
     meeting.addClient(userId, deviceRtpCaps, socket);
 
     socket.emit("meeting:establish-conn");
@@ -37,7 +38,14 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
 
     if (meeting.clientsCount === 0) {
       console.log("MEETING IS EMPTY");
-      // meetings.delete(meetingId);
+
+      try {
+        meeting.router.close();
+        meeting.worker.appData.load--;
+        meetings.delete(meetingId);
+      } catch (error) {
+        console.error("Error cleaning up meeting:", error);
+      }
     }
 
     // Notify other clients about the disconnection
@@ -51,7 +59,7 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
 /**
  * Gets the meeting from the map otherwise it creates a new meeting instance.
  */
-const getMeeting = async (userId: string, meetingId: string) => {
+const getMeeting = async (meetingId: string) => {
   if (meetings.has(meetingId)) {
     console.log("MEETING EXIST");
     return meetings.get(meetingId) as Meeting;
@@ -64,7 +72,7 @@ const getMeeting = async (userId: string, meetingId: string) => {
 
   worker.appData.load++;
 
-  const meeting = new Meeting(userId, worker, router);
+  const meeting = new Meeting(meetingId, worker, router);
   meetings.set(meetingId, meeting);
 
   return meeting;

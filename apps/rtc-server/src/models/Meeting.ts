@@ -13,7 +13,7 @@ import type { Worker } from "mediasoup/node/lib/types.js";
 class Meeting {
   public id: string;
   public router: Router<RouterAppData>;
-  private worker: Worker<WorkerAppData>;
+  public worker: Worker<WorkerAppData>;
   private clients: Map<string, Client>;
 
   constructor(
@@ -85,7 +85,11 @@ class Meeting {
     socket.on("meeting:initialize-consumers", async () => {
       try {
         await client.initializeConsumers([...this.clients.values()]);
+
+        // add the new client to the clients map.
+        console.log("CLIENT:", userId);
         this.clients.set(userId, client);
+
         console.log(`Clients count: ${this.clients.size}`);
       } catch (error) {
         console.error("Error initializing consumers:", error);
@@ -120,14 +124,6 @@ class Meeting {
       this.removeClient(userId);
 
       // Clean up meeting if no clients left
-      // if (this.clientsCount === 0) {
-      //   try {
-      //     this.router.close();
-      //     this.worker.appData.load--;
-      //   } catch (error) {
-      //     console.error("Error cleaning up meeting:", error);
-      //   }
-      // }
     } catch (error) {
       console.error(`Error in cleanup for user ${userId}:`, error);
     }

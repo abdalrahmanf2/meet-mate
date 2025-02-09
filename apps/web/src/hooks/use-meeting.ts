@@ -22,6 +22,7 @@ interface MeetingState {
   sendTransport: Transport | null;
   receiveTransport: Transport | null;
   isConnected: boolean;
+  isReconnecting: boolean;
 }
 
 const SOCKET_SERVER_URL =
@@ -38,6 +39,7 @@ const useMeeting = (userId: string, meetingId: string) => {
     sendTransport: null,
     receiveTransport: null,
     isConnected: false,
+    isReconnecting: false,
   });
   const { toast } = useToast();
 
@@ -67,6 +69,7 @@ const useMeeting = (userId: string, meetingId: string) => {
       });
 
       socket.on("connect", () => {
+        console.log("Socket connected");
         socket.emit("meeting:join");
       });
 
@@ -74,9 +77,33 @@ const useMeeting = (userId: string, meetingId: string) => {
         toast({ title: "New client has joined the meeting" });
       });
 
+      socket.on("disconnect", (reason) => {
+        console.log("Socket disconnected:", reason);
+        toast({ title: "Disconnected", description: reason });
+      });
+
+      socket.on("reconnect", (attemptNumber) => {
+        console.log("Socket reconnected after attempt:", attemptNumber);
+        toast({ title: "Reconnected" });
+      });
+
+      socket.on("reconnecting", (attemptNumber) => {
+        console.log("Socket reconnecting attempt:", attemptNumber);
+        toast({
+          title: "Attempting to reconnect",
+          description: `Attempt ${attemptNumber}`,
+        });
+        setState((prev) => ({ ...prev, isReconnecting: true }));
+      });
+
+      socket.on("error", (error) => {
+        console.error("Socket error:", error);
+        handleError(error, "Connection error");
+      });
+
       return socket;
     },
-    [toast]
+    [toast, handleError]
   );
 
   const loadDevice = useCallback(
@@ -126,6 +153,9 @@ const useMeeting = (userId: string, meetingId: string) => {
           if (e instanceof Error) {
             errback(e);
             handleError(e, e.message);
+          } else {
+            // Handle non-Error objects (if any)
+            handleError(new Error(String(e)), "onConnectTransport failed");
           }
         }
       };
@@ -164,6 +194,8 @@ const useMeeting = (userId: string, meetingId: string) => {
               if (e instanceof Error) {
                 errback(e);
                 handleError(e, e.message);
+              } else {
+                handleError(new Error(String(e)), "produce failed");
               }
             }
           });
@@ -180,6 +212,8 @@ const useMeeting = (userId: string, meetingId: string) => {
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
+          } else {
+            handleError(new Error(String(e)), "setupSendTransport failed");
           }
         }
       };
@@ -205,6 +239,8 @@ const useMeeting = (userId: string, meetingId: string) => {
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
+          } else {
+            handleError(new Error(String(e)), "setupRecvTransport failed");
           }
         }
       };
@@ -220,7 +256,11 @@ const useMeeting = (userId: string, meetingId: string) => {
         try {
           const recvTransport = state.receiveTransport;
           if (!recvTransport) {
-            throw new Error("Receive transport is not initialized");
+            console.warn(
+              "Receive transport is not initialized yet.  Deferring consumer creation."
+            );
+            setTimeout(() => handleNewConsumer(consumerOptions), 500);
+            return;
           }
           const consumer = await recvTransport.consume(consumerOptions);
           consumersRef.current.set(consumer.id, consumer); // Store the consumer in the ref
@@ -231,6 +271,8 @@ const useMeeting = (userId: string, meetingId: string) => {
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
+          } else {
+            handleError(new Error(String(e)), "handleNewConsumer failed");
           }
         }
       };
@@ -243,11 +285,6 @@ const useMeeting = (userId: string, meetingId: string) => {
             console.log(`Closing consumer ${consumerId}`);
             consumer.close();
             consumersRef.current.delete(consumerId);
-            setState((prev) => ({
-              ...prev,
-              consumers: prev.consumers.filter((c) => c.id !== consumerId),
-            }));
-            // Optionally, update your UI to remove the video/audio track
           }
         });
       };
@@ -278,18 +315,40 @@ const useMeeting = (userId: string, meetingId: string) => {
 
     setupConsumers(newSocket);
 
-    newSocket.on("meeting:establish-conn", async () => {
+    const handleEstablishConn = async () => {
       try {
         await setupSendTransport();
         await setupRecvTransport();
+
+        // Set "reconnecting" state to false after successful re-initialization
+        setState((prev) => ({ ...prev, isReconnecting: false }));
       } catch (e) {
         if (e instanceof Error) {
           handleError(e, "Error establishing a connection");
+        } else {
+          handleError(new Error(String(e)), "handleEstablishConn failed");
         }
       }
+    };
+
+    newSocket.on("meeting:establish-conn", handleEstablishConn);
+
+    newSocket.on("reconnect", () => {
+      console.log("Socket reconnected, re-establishing connection");
+      handleEstablishConn();
     });
 
     return () => {
+      newSocket.off("meeting:establish-conn");
+      newSocket.off("meeting:rtp-capabilities");
+      newSocket.off("meeting:new-consumer");
+      newSocket.off("meeting:producer-closed");
+      newSocket.off("connect");
+      newSocket.off("disconnect");
+      newSocket.off("reconnect");
+      newSocket.off("reconnecting");
+      newSocket.off("error");
+
       newSocket.disconnect();
 
       for (const producer of state.producers) {
@@ -312,6 +371,7 @@ const useMeeting = (userId: string, meetingId: string) => {
         sendTransport: null,
         receiveTransport: null,
         isConnected: false,
+        isReconnecting: false,
       });
     };
   }, []);
@@ -319,7 +379,7 @@ const useMeeting = (userId: string, meetingId: string) => {
   console.log("PRODUCERS:", state.producers);
   console.log("CONSUMERS:", state.consumers);
 
-  return { ...state };
+  return { ...state, error, socket };
 };
 
 export default useMeeting;

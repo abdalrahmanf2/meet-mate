@@ -18,7 +18,7 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     socket.join(meetingId);
 
     // Notify all clients that a new client has joined
-    socket.to(meetingId).emit("meeting:new-client-joined", () => {});
+    socket.to(meetingId).emit("meeting:new-client-joined");
 
     const deviceRtpCaps = await socket.emitWithAck(
       "meeting:rtp-capabilities",

@@ -20,7 +20,7 @@ class Client {
   public producers: Producer[];
   public consumers: Consumer[];
   private deviceRtpCaps: RtpCapabilities;
-  private socket: Socket;
+  public socket: Socket;
   private router: Router<RouterAppData>;
   private sendTrans: WebRtcTransport | undefined;
   private recvTrans: WebRtcTransport | undefined;
@@ -77,31 +77,23 @@ class Client {
    * Connects a transport to it's relevant client side transport (Send/Receive).
    */
   async connectTrans(dtlsParameters: DtlsParameters, type: "send" | "receive") {
-    if (type === "send" && this.sendTrans) {
-      if (this.sendTrans.closed) {
-        throw new Error("Send transport is closed");
-      }
-      if (this.sendTrans.dtlsParameters) {
-        console.warn("Send transport is already connected");
-        return true; // Already connected
-      }
-      await this.sendTrans.connect({ dtlsParameters });
-      return true;
+    let transport = type === "send" ? this.sendTrans : this.recvTrans;
+
+    if (!transport) {
+      throw new Error(`${type} transport not created`);
     }
 
-    if (type === "receive" && this.recvTrans) {
-      if (this.recvTrans.closed) {
-        throw new Error("Receive transport is closed");
-      }
-      if (this.recvTrans.dtlsParameters) {
-        console.warn("Receive transport is already connected");
-        return true; // Already connected
-      }
-      await this.recvTrans.connect({ dtlsParameters });
-      return true;
+    if (transport.closed) {
+      throw new Error(`${type} transport is closed`);
     }
 
-    return false;
+    if (transport.dtlsParameters) {
+      console.warn(`${type} transport is already connected`);
+      return true; // Already connected
+    }
+
+    await transport.connect({ dtlsParameters });
+    return true;
   }
 
   /**
@@ -112,7 +104,11 @@ class Client {
     kind: "audio" | "video";
   }) {
     try {
-      const producer = await this.sendTrans?.produce(producerOptions);
+      if (!this.sendTrans) {
+        throw new Error("Send transport not created");
+      }
+
+      const producer = await this.sendTrans.produce(producerOptions);
 
       if (!producer) {
         throw new Error("Producer couldn't be created");
@@ -120,7 +116,7 @@ class Client {
 
       this.producers.push(producer);
 
-      return producer.id;
+      return producer;
     } catch (e) {
       console.error(e);
     }
@@ -144,32 +140,53 @@ class Client {
    * Usage: when a new client connects to the meeting
    */
   async addConsumer(producer: Producer) {
-    const initialconsumerOptions: ConsumerOptions = {
-      producerId: producer.id,
-      rtpCapabilities: this.deviceRtpCaps,
-      paused: true,
-    };
-
-    if (this.router.canConsume(initialconsumerOptions)) {
-      const consumer = await this.recvTrans?.consume(initialconsumerOptions);
-
-      if (!consumer) {
-        throw new Error(
-          "Couldn't create a consumer for producer" + producer.id
-        );
+    try {
+      if (!this.recvTrans) {
+        throw new Error("Receive transport not created");
       }
 
-      const consumerOptions = {
-        id: consumer?.id,
-        producerId: consumer.producerId,
-        kind: consumer.kind,
-        rtpParameters: consumer.rtpParameters,
+      const initialconsumerOptions: ConsumerOptions = {
+        producerId: producer.id,
+        rtpCapabilities: this.deviceRtpCaps,
+        paused: true,
       };
 
-      this.socket.emit("meeting:new-consumer", consumerOptions);
+      if (this.router.canConsume(initialconsumerOptions)) {
+        const consumer = await this.recvTrans.consume(initialconsumerOptions);
 
-      this.consumers.push(consumer);
-      return consumer;
+        if (!consumer) {
+          throw new Error(
+            "Couldn't create a consumer for producer" + producer.id
+          );
+        }
+
+        const consumerOptions = {
+          id: consumer?.id,
+          producerId: consumer.producerId,
+          kind: consumer.kind,
+          rtpParameters: consumer.rtpParameters,
+        };
+
+        this.socket.emit("meeting:new-consumer", consumerOptions);
+
+        this.consumers.push(consumer);
+        return consumer;
+      }
+    } catch (error) {
+      console.error("Error creating consumer:", error);
+    }
+  }
+
+  async closeTransports() {
+    try {
+      if (this.sendTrans && !this.sendTrans.closed) {
+        this.sendTrans.close();
+      }
+      if (this.recvTrans && !this.recvTrans.closed) {
+        this.recvTrans.close();
+      }
+    } catch (error) {
+      console.error("Error closing transports:", error);
     }
   }
 }

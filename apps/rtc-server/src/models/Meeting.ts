@@ -9,6 +9,7 @@ import type {
 } from "mediasoup/node/lib/rtpParametersTypes.js";
 import type { DtlsParameters } from "mediasoup/node/lib/WebRtcTransportTypes.js";
 import type { Worker } from "mediasoup/node/lib/types.js";
+import { meetings } from "../sockets/meeting.ts";
 
 class Meeting {
   public id: string;
@@ -73,8 +74,21 @@ class Meeting {
         ack: (producerId?: string) => void
       ) => {
         try {
-          const producerId = await client.createProducer(producerOptions);
-          ack(producerId);
+          const producer = await client.createProducer(producerOptions);
+
+          if (!producer) {
+            return;
+          }
+
+          // after creating an producer consume it in all clients
+          for (const client of this.clients.values()) {
+            if (client.userId !== userId) {
+              // Don't consume in the same client
+              await client.addConsumer(producer);
+            }
+          }
+
+          ack(producer.id);
         } catch (error) {
           console.error("Error creating producer:", error);
           ack(undefined);
@@ -97,15 +111,17 @@ class Meeting {
     });
   }
 
-  cleanup(userId: string) {
+  async cleanup(userId: string) {
     const client = this.getClient(userId);
     if (!client) return;
 
     try {
-      // Close all producers
+      // Close all producers and notify other clients
       for (const producer of client.producers) {
         try {
           producer.close();
+          // Notify other clients that this producer has been closed
+          this.notifyProducerClosed(userId, producer.id);
         } catch (error) {
           console.error(`Error closing producer:`, error);
         }
@@ -120,12 +136,64 @@ class Meeting {
         }
       }
 
+      // Close Transports
+      try {
+        await client.closeTransports();
+      } catch (error) {
+        console.error(`Error closing transports:`, error);
+      }
+
       // Remove client
       this.removeClient(userId);
 
       // Clean up meeting if no clients left
+      if (this.clientsCount === 0) {
+        this.cleanupMeeting();
+      }
     } catch (error) {
       console.error(`Error in cleanup for user ${userId}:`, error);
+    }
+  }
+
+  private notifyProducerClosed(closedUserId: string, producerId: string) {
+    // Iterate through all other clients and notify them if they
+    // were consuming from the closed client's producer.
+    for (const [clientId, client] of this.clients) {
+      if (clientId === closedUserId) continue;
+
+      for (const consumer of client.consumers) {
+        if (consumer.producerId === producerId) {
+          // Send a message to this client to close the consumer
+          client.socket.emit("meeting:producer-closed", {
+            producerId: producerId,
+          });
+
+          try {
+            consumer.close();
+          } catch (error) {
+            console.error(
+              `Error closing consumer ${consumer.id} for client ${clientId}:`,
+              error
+            );
+          }
+        }
+      }
+      // Remove the consumer from the client's list of consumers
+      client.consumers = client.consumers.filter(
+        (consumer) => consumer.producerId !== producerId
+      );
+    }
+  }
+
+  private cleanupMeeting() {
+    console.log("MEETING IS EMPTY, CLEANING UP");
+
+    try {
+      this.router.close();
+      this.worker.appData.load--;
+      meetings.delete(this.id);
+    } catch (error) {
+      console.error("Error cleaning up meeting:", error);
     }
   }
 

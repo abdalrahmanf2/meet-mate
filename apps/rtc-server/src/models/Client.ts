@@ -131,7 +131,6 @@ class Client {
     for (const client of clients) {
       // It's Usually 1-3 Producers per client so it's ok to nest a loop here
       for (const producer of client.producers) {
-        console.log("PRODUCER", producer.id);
         await this.addConsumer(client.userId, producer);
       }
     }
@@ -160,7 +159,7 @@ class Client {
       const initialConsumerOptions: ConsumerOptions<ConsumerAppData> = {
         producerId: producer.id,
         rtpCapabilities: this.deviceRtpCaps,
-        paused: true,
+        // paused: false,
         appData: { userId },
       };
 
@@ -191,6 +190,10 @@ class Client {
         };
 
         this.socket.emit("meeting:new-consumer", consumerOptions);
+        // this.socket.on("meeting:resume-consumer", () => {
+        //   consumer.resume();
+        //   console.log("RESUMING CONSUMER");
+        // });
 
         this.consumers.push(consumer);
         console.log("CONSUMERS LENGTH", this.consumers.length);

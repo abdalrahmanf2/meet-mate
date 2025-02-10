@@ -6,6 +6,7 @@ interface StreamProps {
 }
 
 const Stream = ({ track, kind }: StreamProps) => {
+  console.log("TRACK:", track);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 

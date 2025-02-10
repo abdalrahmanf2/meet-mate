@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Client } from "@/types/media-soup";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Stream from "./stream";
 import { useMeetingStore } from "@/providers/meeting-store-provider";
 

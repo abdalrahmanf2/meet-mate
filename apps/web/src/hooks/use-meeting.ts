@@ -265,6 +265,10 @@ const useMeeting = (userId: string, meetingId: string) => {
 
           const consumer: Consumer<ConsumerAppData> =
             await recvTransport.consume(consumerOptions);
+
+          // consumer.resume();
+          // socket.emit("meeting:resume-consumer");
+
           consumersRef.current.set(consumer.id, consumer); // Store the consumer in the ref
 
           setState((prev) => {

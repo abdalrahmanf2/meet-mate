@@ -16,12 +16,15 @@ const Meeting = () => {
     router.replace("/");
   }
 
-  useMeeting(session.data?.user?.id as string, meetingId as string);
+  const { clients } = useMeeting(
+    session.data?.user?.id as string,
+    meetingId as string
+  );
 
   return (
     <div className="flex flex-col gap-8">
       <div className="grid gap-8 grid-cols-4">
-        <ParticipantsGrid className="col-span-3" />
+        <ParticipantsGrid clients={clients} className="col-span-3" />
         <Chat className="col-span-1" />
       </div>
       <Controlls />

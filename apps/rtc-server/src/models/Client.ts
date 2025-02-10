@@ -14,11 +14,12 @@ import type {
 import { webRtcTransportConfig } from "../config/mediasoup.ts";
 import type { TransportOptions } from "mediasoup-client/lib/types.js";
 import type { Socket } from "socket.io";
+import type { ConsumerAppData } from "types/media-soup.ts";
 
 class Client {
   public userId: string;
   public producers: Producer[];
-  public consumers: Consumer[];
+  public consumers: Consumer<ConsumerAppData>[];
   private deviceRtpCaps: RtpCapabilities;
   public socket: Socket;
   private router: Router<RouterAppData>;
@@ -130,7 +131,8 @@ class Client {
     for (const client of clients) {
       // It's Usually 1-3 Producers per client so it's ok to nest a loop here
       for (const producer of client.producers) {
-        await this.addConsumer(producer);
+        console.log("PRODUCER", producer.id);
+        await this.addConsumer(client.userId, producer);
       }
     }
   }
@@ -139,20 +141,38 @@ class Client {
    * Add a new consumer.
    * Usage: when a new client connects to the meeting
    */
-  async addConsumer(producer: Producer) {
+  async addConsumer(userId: string, producer: Producer) {
     try {
       if (!this.recvTrans) {
         throw new Error("Receive transport not created");
       }
 
-      const initialconsumerOptions: ConsumerOptions = {
+      // Check if a consumer for this producer already exists
+      if (
+        this.consumers.some((consumer) => consumer.producerId === producer.id)
+      ) {
+        console.log(
+          `Consumer for producer ${producer.id} already exists for user ${this.userId}. Skipping.`
+        );
+        return; // Skip creating a new consumer
+      }
+
+      const initialConsumerOptions: ConsumerOptions<ConsumerAppData> = {
         producerId: producer.id,
         rtpCapabilities: this.deviceRtpCaps,
         paused: true,
+        appData: { userId },
       };
 
-      if (this.router.canConsume(initialconsumerOptions)) {
-        const consumer = await this.recvTrans.consume(initialconsumerOptions);
+      if (
+        this.router.canConsume({
+          producerId: producer.id,
+          rtpCapabilities: this.deviceRtpCaps,
+        })
+      ) {
+        const consumer = await this.recvTrans.consume<ConsumerAppData>(
+          initialConsumerOptions
+        );
 
         if (!consumer) {
           throw new Error(
@@ -161,15 +181,19 @@ class Client {
         }
 
         const consumerOptions = {
-          id: consumer?.id,
+          id: consumer.id,
           producerId: consumer.producerId,
           kind: consumer.kind,
           rtpParameters: consumer.rtpParameters,
+          appData: {
+            userId,
+          },
         };
 
         this.socket.emit("meeting:new-consumer", consumerOptions);
 
         this.consumers.push(consumer);
+        console.log("CONSUMERS LENGTH", this.consumers.length);
         return consumer;
       }
     } catch (error) {
@@ -178,6 +202,8 @@ class Client {
   }
 
   async closeTransports() {
+    console.log("CLOSING TRANSPORTS");
+
     try {
       if (this.sendTrans && !this.sendTrans.closed) {
         this.sendTrans.close();

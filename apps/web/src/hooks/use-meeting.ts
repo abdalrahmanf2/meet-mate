@@ -14,11 +14,13 @@ import {
   Transport,
 } from "mediasoup-client/lib/types";
 import { useToast } from "./use-toast";
+import type { ConsumerAppData } from "types/media-soup.ts";
+import { Client } from "@/types/media-soup";
 
 interface MeetingState {
   device: Device | null;
   producers: Producer[];
-  consumers: Consumer[];
+  consumers: Map<string, Client>;
   sendTransport: Transport | null;
   receiveTransport: Transport | null;
   isConnected: boolean;
@@ -35,7 +37,7 @@ const useMeeting = (userId: string, meetingId: string) => {
   const [state, setState] = useState<MeetingState>({
     device: null,
     producers: [],
-    consumers: [],
+    consumers: new Map<string, Client>(),
     sendTransport: null,
     receiveTransport: null,
     isConnected: false,
@@ -236,12 +238,14 @@ const useMeeting = (userId: string, meetingId: string) => {
           );
 
           setState((prev) => ({ ...prev, receiveTransport: recvTransport }));
+          return recvTransport; // Return the recvTransport
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
           } else {
             handleError(new Error(String(e)), "setupRecvTransport failed");
           }
+          return null; // Return null in case of error
         }
       };
 
@@ -251,10 +255,11 @@ const useMeeting = (userId: string, meetingId: string) => {
   );
 
   const setupConsumers = useCallback(
-    (socket: Socket) => {
-      const handleNewConsumer = async (consumerOptions: ConsumerOptions) => {
+    (socket: Socket, recvTransport: Transport) => {
+      const handleNewConsumer = async (
+        consumerOptions: ConsumerOptions<ConsumerAppData>
+      ) => {
         try {
-          const recvTransport = state.receiveTransport;
           if (!recvTransport) {
             console.warn(
               "Receive transport is not initialized yet.  Deferring consumer creation."
@@ -262,12 +267,21 @@ const useMeeting = (userId: string, meetingId: string) => {
             setTimeout(() => handleNewConsumer(consumerOptions), 500);
             return;
           }
-          const consumer = await recvTransport.consume(consumerOptions);
+
+          const consumer: Consumer<ConsumerAppData> =
+            await recvTransport.consume(consumerOptions);
           consumersRef.current.set(consumer.id, consumer); // Store the consumer in the ref
-          setState((prev) => ({
-            ...prev,
-            consumers: [...prev.consumers, consumer],
-          }));
+
+          setState((prev) => {
+            const updatedConsumers = new Map(prev.consumers);
+            const userConsumers =
+              updatedConsumers.get(consumer.appData.userId) || {};
+
+            userConsumers[consumer.kind] = consumer;
+            updatedConsumers.set(consumer.appData.userId, userConsumers);
+
+            return { ...prev, consumers: updatedConsumers };
+          });
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
@@ -294,7 +308,7 @@ const useMeeting = (userId: string, meetingId: string) => {
 
       socket.emit("meeting:initialize-consumers");
     },
-    [handleError, state.receiveTransport]
+    [handleError]
   );
 
   // on joining the meeting
@@ -313,14 +327,17 @@ const useMeeting = (userId: string, meetingId: string) => {
       userMedia
     );
 
-    setupConsumers(newSocket);
+    const initializeConsumers = async () => {
+      const recvTransport = await setupRecvTransport();
+      if (recvTransport) {
+        setupConsumers(newSocket, recvTransport);
+      }
+    };
 
-    const handleEstablishConn = async () => {
+    newSocket.on("meeting:establish-conn", async () => {
       try {
         await setupSendTransport();
-        await setupRecvTransport();
-
-        // Set "reconnecting" state to false after successful re-initialization
+        await initializeConsumers();
         setState((prev) => ({ ...prev, isReconnecting: false }));
       } catch (e) {
         if (e instanceof Error) {
@@ -329,13 +346,10 @@ const useMeeting = (userId: string, meetingId: string) => {
           handleError(new Error(String(e)), "handleEstablishConn failed");
         }
       }
-    };
-
-    newSocket.on("meeting:establish-conn", handleEstablishConn);
+    });
 
     newSocket.on("reconnect", () => {
       console.log("Socket reconnected, re-establishing connection");
-      handleEstablishConn();
     });
 
     return () => {
@@ -367,7 +381,7 @@ const useMeeting = (userId: string, meetingId: string) => {
       setState({
         device: null,
         producers: [],
-        consumers: [],
+        consumers: new Map<string, Client>(),
         sendTransport: null,
         receiveTransport: null,
         isConnected: false,
@@ -376,10 +390,12 @@ const useMeeting = (userId: string, meetingId: string) => {
     };
   }, []);
 
-  console.log("PRODUCERS:", state.producers);
-  console.log("CONSUMERS:", state.consumers);
-
-  return { ...state, error, socket };
+  return {
+    clients: state.consumers,
+    error,
+    isConnected: state.isConnected,
+    isReconnecting: state.isReconnecting,
+  };
 };
 
 export default useMeeting;

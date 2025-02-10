@@ -26,7 +26,6 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     );
 
     // Add the new client that just has joined
-    console.log("USER ID", userId);
     meeting.addClient(userId, deviceRtpCaps, socket);
 
     socket.emit("meeting:establish-conn");
@@ -37,8 +36,6 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     meeting.cleanup(userId);
 
     if (meeting.clientsCount === 0) {
-      console.log("MEETING IS EMPTY");
-
       try {
         meeting.router.close();
         meeting.worker.appData.load--;

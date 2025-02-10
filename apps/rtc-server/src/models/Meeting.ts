@@ -84,7 +84,7 @@ class Meeting {
           for (const client of this.clients.values()) {
             if (client.userId !== userId) {
               // Don't consume in the same client
-              await client.addConsumer(producer);
+              await client.addConsumer(client.userId, producer);
             }
           }
 
@@ -101,7 +101,6 @@ class Meeting {
         await client.initializeConsumers([...this.clients.values()]);
 
         // add the new client to the clients map.
-        console.log("CLIENT:", userId);
         this.clients.set(userId, client);
 
         console.log(`Clients count: ${this.clients.size}`);

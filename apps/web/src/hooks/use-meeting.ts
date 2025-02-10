@@ -71,7 +71,6 @@ const useMeeting = (userId: string, meetingId: string) => {
       });
 
       socket.on("connect", () => {
-        console.log("Socket connected");
         socket.emit("meeting:join");
       });
 
@@ -80,17 +79,14 @@ const useMeeting = (userId: string, meetingId: string) => {
       });
 
       socket.on("disconnect", (reason) => {
-        console.log("Socket disconnected:", reason);
         toast({ title: "Disconnected", description: reason });
       });
 
       socket.on("reconnect", (attemptNumber) => {
-        console.log("Socket reconnected after attempt:", attemptNumber);
-        toast({ title: "Reconnected" });
+        toast({ title: `Reconnected after ${attemptNumber} attemps` });
       });
 
       socket.on("reconnecting", (attemptNumber) => {
-        console.log("Socket reconnecting attempt:", attemptNumber);
         toast({
           title: "Attempting to reconnect",
           description: `Attempt ${attemptNumber}`,
@@ -99,7 +95,6 @@ const useMeeting = (userId: string, meetingId: string) => {
       });
 
       socket.on("error", (error) => {
-        console.error("Socket error:", error);
         handleError(error, "Connection error");
       });
 
@@ -348,8 +343,12 @@ const useMeeting = (userId: string, meetingId: string) => {
       }
     });
 
-    newSocket.on("reconnect", () => {
-      console.log("Socket reconnected, re-establishing connection");
+    newSocket.on("meeting:client-disconnected", (userId: string) => {
+      const updatedConsumers = new Map(state.consumers);
+      updatedConsumers.delete(userId);
+
+      setState((prev) => ({ ...prev, consumers: updatedConsumers }));
+      toast({ title: "Someone has left" });
     });
 
     return () => {
@@ -357,6 +356,7 @@ const useMeeting = (userId: string, meetingId: string) => {
       newSocket.off("meeting:rtp-capabilities");
       newSocket.off("meeting:new-consumer");
       newSocket.off("meeting:producer-closed");
+      newSocket.off("meeting:client-disconnected");
       newSocket.off("connect");
       newSocket.off("disconnect");
       newSocket.off("reconnect");
@@ -389,6 +389,8 @@ const useMeeting = (userId: string, meetingId: string) => {
       });
     };
   }, []);
+
+  console.log("PRODUCERS:", state.producers);
 
   return {
     clients: state.consumers,

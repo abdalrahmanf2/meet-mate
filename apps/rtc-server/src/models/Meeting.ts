@@ -84,7 +84,7 @@ class Meeting {
           for (const client of this.clients.values()) {
             if (client.userId !== userId) {
               // Don't consume in the same client
-              await client.addConsumer(client.userId, producer);
+              await client.addConsumer(userId, producer);
             }
           }
 

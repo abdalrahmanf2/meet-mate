@@ -7,7 +7,7 @@ import ParticipantsGrid from "./participants-grid";
 import useMeeting from "@/hooks/use-meeting";
 import { useSession } from "next-auth/react";
 
-const Meeting = () => {
+const MeetingRoom = () => {
   const { meetingId } = useParams();
   const router = useRouter();
   const session = useSession();
@@ -32,4 +32,4 @@ const Meeting = () => {
   );
 };
 
-export default Meeting;
+export default MeetingRoom;

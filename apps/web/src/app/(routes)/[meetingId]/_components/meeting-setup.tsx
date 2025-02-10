@@ -81,7 +81,7 @@ const MeetingSetup = () => {
 
   if (isPending || error) {
     return (
-      <div className="min-h-[75vh] text-center flex items-center justify-center">
+      <div className="min-h-[75vh] text-center flex flex-col gap-4 items-center justify-center">
         <h1 className="text-muted-foreground text-2xl font-semibold">
           <Video className="m-auto size-20" />
           Please allow access to your media devices!

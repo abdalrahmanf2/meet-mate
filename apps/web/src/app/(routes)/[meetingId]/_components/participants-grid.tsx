@@ -1,12 +1,15 @@
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getUserById } from "@/data/users";
 import { cn } from "@/lib/utils";
 import { Client } from "@/types/media-soup";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Stream from "./stream";
+import { useMeetingStore } from "@/providers/meeting-store-provider";
 
 interface ParticipantsGridProps {
   clients: Map<string, Client>;
@@ -15,8 +18,6 @@ interface ParticipantsGridProps {
 
 const ParticipantsGrid = ({ clients, className }: ParticipantsGridProps) => {
   const { data: session } = useSession();
-  console.log("USER ID", session?.user?.id);
-  console.log(clients);
 
   return (
     <div
@@ -34,14 +35,16 @@ const ParticipantsGrid = ({ clients, className }: ParticipantsGridProps) => {
   );
 };
 
-interface ParticipantCardProps {
+type ParticipantCardProps = {
   userId: string;
   client?: Client;
-}
+};
 
 const ParticipantCard = ({ userId, client }: ParticipantCardProps) => {
+  const userMedia = useMeetingStore((state) => state.mediaStream);
   const [isTalking, setIsTalking] = useState(false);
-  const { data: user } = useQuery({
+
+  const { data: user, isLoading } = useQuery({
     queryKey: [userId],
     queryFn: () => getUserById(userId),
   });
@@ -55,9 +58,22 @@ const ParticipantCard = ({ userId, client }: ParticipantCardProps) => {
     >
       <Avatar className="size-32">
         <AvatarImage src={user?.image || ""} />
-        <AvatarFallback>MM</AvatarFallback>
+        <AvatarFallback>
+          <Skeleton />
+        </AvatarFallback>
       </Avatar>
-      <p className="text-muted-foreground text-sm text-center">{user?.name}</p>
+      {isLoading ? (
+        <Skeleton className="w-[50px] h-4" />
+      ) : (
+        <p className="text-muted-foreground text-sm text-center">
+          {user?.name}
+        </p>
+      )}
+
+      <div className="">
+        {client?.video && <Stream track={client?.video?.track} kind="video" />}
+        {client?.audio && <Stream track={client?.audio?.track} kind="audio" />}
+      </div>
     </div>
   );
 };

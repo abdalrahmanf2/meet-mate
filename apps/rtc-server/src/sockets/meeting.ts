@@ -9,6 +9,8 @@ export const meetings = new Map<string, Meeting>();
 
 export const meetingHandler = async (io: Server, socket: Socket) => {
   const meetingId = socket.handshake.query.meetingId as string;
+
+  // Current socket user's id.
   const userId = socket.handshake.query.userId as string;
 
   const meeting = await getMeeting(meetingId);
@@ -35,18 +37,8 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     console.log("SOMEONE LEFT");
     meeting.cleanup(userId);
 
-    if (meeting.clientsCount === 0) {
-      try {
-        meeting.router.close();
-        meeting.worker.appData.load--;
-        meetings.delete(meetingId);
-      } catch (error) {
-        console.error("Error cleaning up meeting:", error);
-      }
-    }
-
     // Notify other clients about the disconnection
-    socket.to(meetingId).emit("meeting:client-disconnected", socket.id);
+    socket.to(meetingId).emit("meeting:client-disconnected", userId);
   };
 
   socket.on("meeting:join", onJoinMeeting);

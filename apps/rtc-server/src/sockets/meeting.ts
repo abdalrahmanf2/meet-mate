@@ -20,7 +20,7 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     socket.join(meetingId);
 
     // Notify all clients that a new client has joined
-    socket.to(meetingId).emit("meeting:new-client-joined");
+    socket.to(meetingId).emit("meeting:new-client-join");
 
     const deviceRtpCaps = await socket.emitWithAck(
       "meeting:rtp-capabilities",
@@ -33,15 +33,25 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     socket.emit("meeting:establish-conn");
   };
 
-  const leaveMeeting = () => {
+  const leaveMeeting = async () => {
     console.log("SOMEONE LEFT");
-    meeting.cleanup(userId);
+    await meeting.cleanup(userId);
 
     // Notify other clients about the disconnection
-    socket.to(meetingId).emit("meeting:client-disconnected", userId);
+    socket.to(meetingId).emit("meeting:client-disconnect", userId);
   };
 
   socket.on("meeting:join", onJoinMeeting);
+
+  // Leave meeting manually or on disconnect
+  socket.on("meeting:leave", async (ack: (left: boolean) => void) => {
+    try {
+      await leaveMeeting();
+      ack(true);
+    } catch {
+      ack(false);
+    }
+  });
   socket.on("disconnect", leaveMeeting);
 };
 

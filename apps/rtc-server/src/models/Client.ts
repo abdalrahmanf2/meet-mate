@@ -84,15 +84,6 @@ class Client {
       throw new Error(`${type} transport not created`);
     }
 
-    if (transport.closed) {
-      throw new Error(`${type} transport is closed`);
-    }
-
-    if (transport.dtlsParameters) {
-      console.warn(`${type} transport is already connected`);
-      return true; // Already connected
-    }
-
     await transport.connect({ dtlsParameters });
     return true;
   }
@@ -110,6 +101,10 @@ class Client {
       }
 
       const producer = await this.sendTrans.produce(producerOptions);
+
+      producer.on("transportclose", () => {
+        this.socket.emit("meeting:producer-transport-close", producer.id);
+      });
 
       if (!producer) {
         throw new Error("Producer couldn't be created");
@@ -159,7 +154,7 @@ class Client {
       const initialConsumerOptions: ConsumerOptions<ConsumerAppData> = {
         producerId: producer.id,
         rtpCapabilities: this.deviceRtpCaps,
-        // paused: false,
+        paused: true,
         appData: { userId },
       };
 
@@ -179,6 +174,14 @@ class Client {
           );
         }
 
+        consumer.on("producerclose", () => {
+          this.socket.emit("meeting:producer-close", producer.id);
+        });
+
+        consumer.on("transportclose", () => {
+          this.socket.emit("meeting:consumer-transport-close", producer.id);
+        });
+
         const consumerOptions = {
           id: consumer.id,
           producerId: consumer.producerId,
@@ -190,13 +193,8 @@ class Client {
         };
 
         this.socket.emit("meeting:new-consumer", consumerOptions);
-        // this.socket.on("meeting:resume-consumer", () => {
-        //   consumer.resume();
-        //   console.log("RESUMING CONSUMER");
-        // });
 
         this.consumers.push(consumer);
-        console.log("CONSUMERS LENGTH", this.consumers.length);
         return consumer;
       }
     } catch (error) {

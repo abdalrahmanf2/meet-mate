@@ -7,6 +7,20 @@ import type { RouterAppData, WorkerAppData } from "../types/media-types.ts";
 
 export const workerConfig: WorkerSettings<WorkerAppData> = {
   logLevel: "debug",
+  logTags: [
+    "info",
+    "ice",
+    "dtls",
+    "rtp",
+    "srtp",
+    "rtcp",
+    "rtx",
+    "bwe",
+    "score",
+    "simulcast",
+    "svc",
+    "sctp",
+  ],
   appData: {
     load: 0,
   },
@@ -28,10 +42,38 @@ export const routerConfig: RouterOptions<RouterAppData> = {
         "x-google-start-bitrate": 1000,
       },
     },
+    {
+      kind: "video",
+      mimeType: "video/VP9",
+      clockRate: 90000,
+      parameters: {
+        "profile-id": 2,
+        "x-google-start-bitrate": 1000,
+      },
+    },
+    {
+      kind: "video",
+      mimeType: "video/h264",
+      clockRate: 90000,
+      parameters: {
+        "packetization-mode": 1,
+        "profile-level-id": "4d0032",
+        "level-asymmetry-allowed": 1,
+        "x-google-start-bitrate": 1000,
+      },
+    },
+    {
+      kind: "video",
+      mimeType: "video/h264",
+      clockRate: 90000,
+      parameters: {
+        "packetization-mode": 1,
+        "profile-level-id": "42e01f",
+        "level-asymmetry-allowed": 1,
+        "x-google-start-bitrate": 1000,
+      },
+    },
   ],
-  appData: {
-    clients: [],
-  },
 };
 
 export const webRtcTransportConfig: WebRtcTransportOptions = {
@@ -39,17 +81,19 @@ export const webRtcTransportConfig: WebRtcTransportOptions = {
     {
       protocol: "udp",
       ip: process.env.MEDIASOUP_LISTEN_IP || "192.168.1.103",
+      // announcedAddress: process.env.MEDIASOUP_ANNOUNCED_IP,
       portRange: {
-        min: 40000,
-        max: 49999,
+        min: Number(process.env.MEDIASOUP_MIN_PORT) || 40000,
+        max: Number(process.env.MEDIASOUP_MAX_PORT) || 49999,
       },
     },
     {
       protocol: "tcp",
       ip: process.env.MEDIASOUP_LISTEN_IP || "192.168.1.103",
+      // announcedAddress: process.env.MEDIASOUP_ANNOUNCED_IP,
       portRange: {
-        min: 40000,
-        max: 49999,
+        min: Number(process.env.MEDIASOUP_MIN_PORT) || 40000,
+        max: Number(process.env.MEDIASOUP_MAX_PORT) || 49999,
       },
     },
   ],

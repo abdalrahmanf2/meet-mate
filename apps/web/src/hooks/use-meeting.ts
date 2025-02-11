@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
@@ -17,12 +16,17 @@ import { useToast } from "./use-toast";
 import type { ConsumerAppData } from "types/media-soup.ts";
 import { Client } from "@/types/media-soup";
 
+interface Connection {
+  connected: boolean;
+  transport: Transport | null;
+}
+
 interface MeetingState {
   device: Device | null;
-  producers: Producer[];
+  producers: Map<string, Producer>;
   consumers: Map<string, Client>;
-  sendTransport: Transport | null;
-  receiveTransport: Transport | null;
+  send: Connection;
+  receive: Connection;
   isConnected: boolean;
   isReconnecting: boolean;
 }
@@ -31,22 +35,30 @@ const SOCKET_SERVER_URL =
   process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
 
 const useMeeting = (userId: string, meetingId: string) => {
-  const userMedia = useMeetingStore((state) => state.mediaStream);
-  const [socket, setSocket] = useState<Socket>();
+  const mediaStream = useMeetingStore((state) => state.mediaStream);
+
   const [error, setError] = useState<Error>();
   const [state, setState] = useState<MeetingState>({
     device: null,
-    producers: [],
+    producers: new Map<string, Producer>(),
     consumers: new Map<string, Client>(),
-    sendTransport: null,
-    receiveTransport: null,
+    send: {
+      connected: false,
+      transport: null,
+    },
+    receive: {
+      connected: false,
+      transport: null,
+    },
     isConnected: false,
     isReconnecting: false,
   });
   const { toast } = useToast();
 
   // Use a ref to hold the consumers map
-  const consumersRef = useRef<Map<string, Consumer>>(new Map());
+  const consumersRef = useRef<Map<string, Consumer<ConsumerAppData>>>(
+    new Map()
+  );
 
   const handleError = useCallback(
     (e: Error, message?: string) => {
@@ -74,7 +86,7 @@ const useMeeting = (userId: string, meetingId: string) => {
         socket.emit("meeting:join");
       });
 
-      socket.on("meeting:new-client-joined", () => {
+      socket.on("meeting:new-client-join", () => {
         toast({ title: "New client has joined the meeting" });
       });
 
@@ -113,6 +125,7 @@ const useMeeting = (userId: string, meetingId: string) => {
           if (!device.loaded) {
             await device.load({ routerRtpCapabilities: rtpCapabilities });
           }
+
           ack(device.rtpCapabilities);
         } catch (e) {
           handleError(
@@ -128,7 +141,7 @@ const useMeeting = (userId: string, meetingId: string) => {
   );
 
   const setupTransports = useCallback(
-    (socket: Socket, device: Device, userMedia: MediaStream | undefined) => {
+    (socket: Socket, device: Device) => {
       const onConnectTransport = async (
         type: "send" | "receive",
         { dtlsParameters }: { dtlsParameters: DtlsParameters },
@@ -169,9 +182,14 @@ const useMeeting = (userId: string, meetingId: string) => {
           const sendTransport =
             device.createSendTransport(sendTransportOptions);
 
-          sendTransport.on("connect", (...params) =>
-            onConnectTransport("send", ...params)
-          );
+          sendTransport.on("connect", async (...params) => {
+            await onConnectTransport("send", ...params);
+            setState((prev) => ({
+              ...prev,
+              send: { connected: true, transport: sendTransport },
+            }));
+          });
+
           sendTransport.on("produce", async (parameters, cb, errback) => {
             try {
               const serverProducerId = await socket.emitWithAck(
@@ -197,25 +215,19 @@ const useMeeting = (userId: string, meetingId: string) => {
             }
           });
 
-          // Initialize producers
-          const producers: Producer[] = [];
-          const tracks = userMedia?.getTracks() || [];
-          for (const track of tracks) {
-            const producer = await sendTransport.produce({ track });
-            producers.push(producer);
-          }
-
-          setState((prev) => ({ ...prev, sendTransport, producers }));
+          return sendTransport;
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
           } else {
             handleError(new Error(String(e)), "setupSendTransport failed");
           }
+
+          return null;
         }
       };
 
-      const setupRecvTransport = async () => {
+      const setupReceiveTransport = async () => {
         try {
           const receiveTransportOptions = await socket.emitWithAck(
             "meeting:create-transport",
@@ -224,16 +236,19 @@ const useMeeting = (userId: string, meetingId: string) => {
           if (!receiveTransportOptions) {
             throw new Error("Couldn't get receive transport options");
           }
-          const recvTransport = device.createRecvTransport(
+          const receiveTransport = device.createRecvTransport(
             receiveTransportOptions
           );
 
-          recvTransport.on("connect", (...params) =>
-            onConnectTransport("receive", ...params)
-          );
+          receiveTransport.on("connect", async (...params) => {
+            await onConnectTransport("receive", ...params);
+            setState((prev) => ({
+              ...prev,
+              receive: { connected: true, transport: receiveTransport },
+            }));
+          });
 
-          setState((prev) => ({ ...prev, receiveTransport: recvTransport }));
-          return recvTransport; // Return the recvTransport
+          return receiveTransport; // Return the recvTransport
         } catch (e) {
           if (e instanceof Error) {
             handleError(e, e.message);
@@ -244,32 +259,83 @@ const useMeeting = (userId: string, meetingId: string) => {
         }
       };
 
-      return { setupSendTransport, setupRecvTransport };
+      return { setupSendTransport, setupReceiveTransport };
     },
     [handleError]
   );
 
+  const setupProducers = useCallback(
+    async (
+      socket: Socket,
+      sendTransport: Transport,
+      userMedia: MediaStream
+    ) => {
+      const producers: Producer[] = [];
+      const tracks = userMedia?.getTracks() || [];
+
+      try {
+        for (const track of tracks) {
+          const producer = await sendTransport.produce({ track });
+          producers.push(producer);
+        }
+
+        setState((prev) => {
+          const updatedProducers = new Map(prev.producers);
+
+          for (const producer of producers) {
+            updatedProducers.set(producer.id, producer);
+          }
+
+          return { ...prev, producers: updatedProducers };
+        });
+      } catch (e) {
+        if (e instanceof Error) {
+          handleError(e, e.message);
+        } else {
+          handleError(new Error(String(e)), "handleNewConsumer failed");
+        }
+      }
+
+      socket.on("meeting:producer-transport-close", (producerId: string) => {
+        const producer = state.producers.get(producerId);
+        if (!producer) {
+          return;
+        }
+
+        producer.close();
+      });
+    },
+    [handleError, state.producers]
+  );
+
   const setupConsumers = useCallback(
-    (socket: Socket, recvTransport: Transport) => {
+    (socket: Socket, receiveTransport: Transport) => {
       const handleNewConsumer = async (
         consumerOptions: ConsumerOptions<ConsumerAppData>
       ) => {
         try {
-          if (!recvTransport) {
+          if (!receiveTransport) {
             console.warn(
-              "Receive transport is not initialized yet.  Deferring consumer creation."
+              "Receive transport is not connected yet. Deferring consumer creation."
             );
             setTimeout(() => handleNewConsumer(consumerOptions), 500);
             return;
           }
 
           const consumer: Consumer<ConsumerAppData> =
-            await recvTransport.consume(consumerOptions);
+            await receiveTransport.consume(consumerOptions);
 
-          // consumer.resume();
-          // socket.emit("meeting:resume-consumer");
+          const success = await socket.emitWithAck(
+            "meeting:unpause-consumer",
+            consumer.id
+          );
+          if (success) {
+            consumer.resume();
+          } else {
+            throw new Error("Couldn't resume a consumer");
+          }
 
-          consumersRef.current.set(consumer.id, consumer); // Store the consumer in the ref
+          consumersRef.current.set(consumer.producerId, consumer); // Store the consumer in the ref
 
           setState((prev) => {
             const updatedConsumers = new Map(prev.consumers);
@@ -290,20 +356,47 @@ const useMeeting = (userId: string, meetingId: string) => {
         }
       };
 
-      const handleProducerClosed = ({ producerId }: { producerId: string }) => {
-        console.log(`Producer ${producerId} closed by server`);
-        // Iterate through the consumers map and close the relevant consumer
-        consumersRef.current.forEach((consumer, consumerId) => {
-          if (consumer.producerId === producerId) {
-            console.log(`Closing consumer ${consumerId}`);
-            consumer.close();
-            consumersRef.current.delete(consumerId);
-          }
+      const handleClose = (producerId: string) => {
+        const consumer = consumersRef.current.get(producerId);
+        if (!consumer) {
+          return;
+        }
+
+        console.log(`Closing consumer ${consumer.id}`);
+        consumer.close();
+        consumersRef.current.delete(producerId);
+
+        // Remove the closed consumers
+        setState((prev) => {
+          const updatedConsumers = new Map(prev.consumers);
+
+          updatedConsumers.forEach((client, key) => {
+            let kind: keyof Client;
+            const updatedClient = { ...client };
+
+            for (kind in client) {
+              if (client[kind]?.producerId !== producerId) {
+                continue;
+              }
+
+              delete updatedClient[kind];
+            }
+
+            // if there's no entries in the client delete it
+            if (Object.keys(client).length === 0) {
+              updatedConsumers.delete(key);
+            } else {
+              updatedConsumers.set(key, updatedClient);
+            }
+          });
+
+          return { ...prev, consumers: updatedConsumers };
         });
       };
 
       socket.on("meeting:new-consumer", handleNewConsumer);
-      socket.on("meeting:producer-closed", handleProducerClosed);
+      socket.on("meeting:producer-close", handleClose);
+      socket.on("meeting:consumer-transport-close", handleClose);
 
       socket.emit("meeting:initialize-consumers");
     },
@@ -312,30 +405,46 @@ const useMeeting = (userId: string, meetingId: string) => {
 
   // on joining the meeting
   useEffect(() => {
-    const newSocket = setupSocket(userId, meetingId);
-    setSocket(newSocket);
+    const socket = setupSocket(userId, meetingId);
 
     const device = new Device();
     setState((prev) => ({ ...prev, device }));
 
-    loadDevice(newSocket, device);
+    loadDevice(socket, device);
 
-    const { setupSendTransport, setupRecvTransport } = setupTransports(
-      newSocket,
-      device,
-      userMedia
+    if (!mediaStream) {
+      toast({
+        title: "Error",
+        description: "Something went wrong with the initial setup",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const userMedia = new MediaStream(mediaStream.getTracks());
+    const { setupSendTransport, setupReceiveTransport } = setupTransports(
+      socket,
+      device
     );
 
     const initializeConsumers = async () => {
-      const recvTransport = await setupRecvTransport();
-      if (recvTransport) {
-        setupConsumers(newSocket, recvTransport);
+      const receiveTransport = await setupReceiveTransport();
+      if (receiveTransport) {
+        setupConsumers(socket, receiveTransport);
       }
     };
 
-    newSocket.on("meeting:establish-conn", async () => {
+    const initializeProducers = async () => {
+      const sendTransport = await setupSendTransport();
+
+      if (sendTransport) {
+        setupProducers(socket, sendTransport, userMedia);
+      }
+    };
+
+    socket.on("meeting:establish-conn", async () => {
       try {
-        await setupSendTransport();
+        await initializeProducers();
         await initializeConsumers();
         setState((prev) => ({ ...prev, isReconnecting: false }));
       } catch (e) {
@@ -347,50 +456,40 @@ const useMeeting = (userId: string, meetingId: string) => {
       }
     });
 
-    newSocket.on("meeting:client-disconnected", (userId: string) => {
+    socket.on("meeting:client-disconnect", (userId: string) => {
       const updatedConsumers = new Map(state.consumers);
       updatedConsumers.delete(userId);
 
       setState((prev) => ({ ...prev, consumers: updatedConsumers }));
-      toast({ title: "Someone has left" });
+      // toast({ title: "Someone has left" });
     });
 
     return () => {
-      newSocket.off("meeting:establish-conn");
-      newSocket.off("meeting:rtp-capabilities");
-      newSocket.off("meeting:new-consumer");
-      newSocket.off("meeting:producer-closed");
-      newSocket.off("meeting:client-disconnected");
-      newSocket.off("connect");
-      newSocket.off("disconnect");
-      newSocket.off("reconnect");
-      newSocket.off("reconnecting");
-      newSocket.off("error");
+      console.log("Cleaning up useMeeting hook");
 
-      newSocket.disconnect();
+      (async () => {
+        const left = await socket.emitWithAck("meeting:leave");
 
-      for (const producer of state.producers) {
-        producer.close();
-      }
-
-      state.sendTransport?.close();
-      state.receiveTransport?.close();
-
-      // Close all consumers
-      consumersRef.current.forEach((consumer) => {
-        consumer.close();
-      });
-      consumersRef.current.clear();
-
-      setState({
-        device: null,
-        producers: [],
-        consumers: new Map<string, Client>(),
-        sendTransport: null,
-        receiveTransport: null,
-        isConnected: false,
-        isReconnecting: false,
-      });
+        if (left) {
+          // Disconnect the socket *before* removing event listeners
+          // socket.disconnect();
+          //
+          // socket.off("meeting:establish-conn");
+          // socket.off("meeting:rtp-capabilities");
+          // socket.off("meeting:initialize-consumer");
+          // socket.off("meeting:new-consumer");
+          // socket.off("meeting:producer-close");
+          // socket.off("meeting:consumer-transport-close");
+          // socket.off("meeting:producer-transport-close");
+          // socket.off("meeting:new-client-join");
+          // socket.off("meeting:client-disconnect");
+          // socket.off("connect");
+          // socket.off("disconnect");
+          // socket.off("reconnect");
+          // socket.off("reconnecting");
+          // socket.off("error");
+        }
+      })();
     };
   }, []);
 

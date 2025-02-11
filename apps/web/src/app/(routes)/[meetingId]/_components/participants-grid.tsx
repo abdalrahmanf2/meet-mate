@@ -18,6 +18,7 @@ interface ParticipantsGridProps {
 
 const ParticipantsGrid = ({ clients, className }: ParticipantsGridProps) => {
   const { data: session } = useSession();
+  console.log("CLIENTS", clients);
 
   return (
     <div

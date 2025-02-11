@@ -80,6 +80,10 @@ class Meeting {
             return;
           }
 
+          producer.on("transportclose", () => {
+            socket.emit("meeting:producer-closed", producer.id);
+          });
+
           // after creating an producer consume it in all clients
           for (const client of this.clients.values()) {
             if (client.userId !== userId) {
@@ -108,6 +112,23 @@ class Meeting {
         console.error("Error initializing consumers:", error);
       }
     });
+
+    socket.on(
+      "meeting:unpause-consumer",
+      async (consumerId: string, ack: (successs: boolean) => void) => {
+        const consumer = client.consumers.find(
+          (consumer) => consumer.id === consumerId
+        );
+
+        if (!consumer) {
+          ack(false);
+        }
+
+        await consumer?.resume();
+        console.log("CONSUMER PAUSED", consumer?.id, consumer?.paused);
+        ack(true);
+      }
+    );
   }
 
   async cleanup(userId: string) {
@@ -115,26 +136,6 @@ class Meeting {
     if (!client) return;
 
     try {
-      // Close all producers and notify other clients
-      for (const producer of client.producers) {
-        try {
-          producer.close();
-          // Notify other clients that this producer has been closed
-          this.notifyProducerClosed(userId, producer.id);
-        } catch (error) {
-          console.error(`Error closing producer:`, error);
-        }
-      }
-
-      // Close all consumers
-      for (const consumer of client.consumers) {
-        try {
-          consumer.close();
-        } catch (error) {
-          console.error(`Error closing consumer:`, error);
-        }
-      }
-
       // Close Transports
       try {
         await client.closeTransports();
@@ -151,36 +152,6 @@ class Meeting {
       }
     } catch (error) {
       console.error(`Error in cleanup for user ${userId}:`, error);
-    }
-  }
-
-  private notifyProducerClosed(closedUserId: string, producerId: string) {
-    // Iterate through all other clients and notify them if they
-    // were consuming from the closed client's producer.
-    for (const [clientId, client] of this.clients) {
-      if (clientId === closedUserId) continue;
-
-      for (const consumer of client.consumers) {
-        if (consumer.producerId === producerId) {
-          // Send a message to this client to close the consumer
-          client.socket.emit("meeting:producer-closed", {
-            producerId: producerId,
-          });
-
-          try {
-            consumer.close();
-          } catch (error) {
-            console.error(
-              `Error closing consumer ${consumer.id} for client ${clientId}:`,
-              error
-            );
-          }
-        }
-      }
-      // Remove the consumer from the client's list of consumers
-      client.consumers = client.consumers.filter(
-        (consumer) => consumer.producerId !== producerId
-      );
     }
   }
 

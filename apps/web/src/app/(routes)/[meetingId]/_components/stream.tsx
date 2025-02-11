@@ -6,7 +6,6 @@ interface StreamProps {
 }
 
 const Stream = ({ track, kind }: StreamProps) => {
-  console.log("TRACK:", track);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -14,11 +13,19 @@ const Stream = ({ track, kind }: StreamProps) => {
     let mediaStream: MediaStream | null = null;
     const video = videoRef.current;
     const audio = audioRef.current;
+    console.log("Track Info:", {
+      kind: track.kind,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      id: track.id,
+      label: track.label,
+    });
 
     try {
       mediaStream = new MediaStream([track]);
 
       if (kind === "video" && video) {
+        console.log("VIDEO OUT");
         video.srcObject = mediaStream;
       } else if (kind === "audio" && audio) {
         audio.srcObject = mediaStream;
@@ -43,7 +50,10 @@ const Stream = ({ track, kind }: StreamProps) => {
   return (
     <>
       {kind === "video" ? (
-        <video ref={videoRef} autoPlay playsInline muted={false} />
+        <>
+          <p>video</p>
+          <video ref={videoRef} autoPlay playsInline muted={false} />
+        </>
       ) : (
         <audio ref={audioRef} autoPlay playsInline muted={false} />
       )}

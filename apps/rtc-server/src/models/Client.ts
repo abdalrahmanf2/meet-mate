@@ -13,31 +13,55 @@ import type {
 } from "mediasoup/node/lib/types.js";
 import { webRtcTransportConfig } from "../config/mediasoup.ts";
 import type { TransportOptions } from "mediasoup-client/lib/types.js";
-import type { Socket } from "socket.io";
+import type { Server, Socket } from "socket.io";
 import type { ConsumerAppData } from "types/media-soup.ts";
 
 class Client {
   public userId: string;
-  public producers: Producer[];
+  public meetingId: string;
+  public producers: Map<string, Producer>;
   public consumers: Consumer<ConsumerAppData>[];
   private deviceRtpCaps: RtpCapabilities;
   public socket: Socket;
+  private io: Server;
   private router: Router<RouterAppData>;
   private sendTrans: WebRtcTransport | undefined;
   private recvTrans: WebRtcTransport | undefined;
 
   constructor(
     userId: string,
+    meetingId: string,
     deviceRtpCaps: RtpCapabilities,
     socket: Socket,
+    io: Server,
     router: Router<RouterAppData>
   ) {
     this.userId = userId;
+    this.meetingId = meetingId;
     this.deviceRtpCaps = deviceRtpCaps;
     this.router = router;
     this.socket = socket;
-    this.producers = [];
+    this.io = io;
+    this.producers = new Map<string, Producer>();
     this.consumers = [];
+
+    this.socket.on("meeting:producer-pause", async (producerId: string) => {
+      const producer = this.producers.get(producerId);
+      if (!producer) {
+        return;
+      }
+
+      await producer.pause();
+    });
+
+    this.socket.on("meeting:producer-resume", async (producerId: string) => {
+      const producer = this.producers.get(producerId);
+      if (!producer) {
+        return;
+      }
+
+      await producer.resume();
+    });
   }
 
   /**
@@ -110,7 +134,7 @@ class Client {
         throw new Error("Producer couldn't be created");
       }
 
-      this.producers.push(producer);
+      this.producers.set(producer.id, producer);
 
       return producer;
     } catch (e) {
@@ -124,8 +148,11 @@ class Client {
   async initializeConsumers(clients: Client[]) {
     // Add the user id to the consumer's app data? I need it to identify users in the client side
     for (const client of clients) {
+      // skip if it's the same user
+      if (client.userId === this.userId) continue;
+
       // It's Usually 1-3 Producers per client so it's ok to nest a loop here
-      for (const producer of client.producers) {
+      for (const producer of client.producers.values()) {
         await this.addConsumer(client.userId, producer);
       }
     }
@@ -182,6 +209,20 @@ class Client {
           this.socket.emit("meeting:consumer-transport-close", producer.id);
         });
 
+        consumer.on("producerpause", () => {
+          console.log("PAUSE PRODUCER");
+          this.io
+            .to(this.meetingId)
+            .emit("meeting:consumer-pause", producer.id);
+        });
+
+        consumer.on("producerresume", () => {
+          console.log("RESUME PRODUCER");
+          this.io
+            .to(this.meetingId)
+            .emit("meeting:consumer-resume", producer.id);
+        });
+
         const consumerOptions = {
           id: consumer.id,
           producerId: consumer.producerId,
@@ -207,6 +248,7 @@ class Client {
 
     try {
       if (this.sendTrans && !this.sendTrans.closed) {
+        console.log("SEND TRANS CLOSING");
         this.sendTrans.close();
       }
       if (this.recvTrans && !this.recvTrans.closed) {

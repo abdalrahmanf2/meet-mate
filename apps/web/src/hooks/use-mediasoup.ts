@@ -16,14 +16,19 @@ import { useToast } from "./use-toast";
 import type { ConsumerAppData } from "types/media-soup.ts";
 import { Client } from "@/types/media-soup";
 
+export interface LocalClient {
+  audio?: Producer;
+  video?: Producer;
+}
+
 interface Connection {
   connected: boolean;
   transport: Transport | null;
 }
 
-interface MeetingState {
+interface MediaSoupState {
   device: Device | null;
-  producers: Map<string, Producer>;
+  producers: LocalClient;
   consumers: Map<string, Client>;
   send: Connection;
   receive: Connection;
@@ -34,13 +39,15 @@ interface MeetingState {
 const SOCKET_SERVER_URL =
   process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
 
-const useMeeting = (userId: string, meetingId: string) => {
+const useMediaSoup = (userId: string, meetingId: string) => {
   const mediaStream = useMeetingStore((state) => state.mediaStream);
+  const isMuted = useMeetingStore((state) => state.isMuted);
 
+  const [stateSocket, setSocket] = useState<Socket>();
   const [error, setError] = useState<Error>();
-  const [state, setState] = useState<MeetingState>({
+  const [state, setState] = useState<MediaSoupState>({
     device: null,
-    producers: new Map<string, Producer>(),
+    producers: {},
     consumers: new Map<string, Client>(),
     send: {
       connected: false,
@@ -53,12 +60,28 @@ const useMeeting = (userId: string, meetingId: string) => {
     isConnected: false,
     isReconnecting: false,
   });
+
   const { toast } = useToast();
+
+  const toggleAudioProducer = useCallback(() => {
+    if (!stateSocket || !state.producers.audio) return;
+
+    if (isMuted) {
+      state.producers.audio.resume();
+      stateSocket.emit("meeting:producer-resume", state.producers.audio.id);
+    } else {
+      state.producers.audio.pause();
+      stateSocket.emit("meeting:producer-pause", state.producers.audio.id);
+    }
+  }, [stateSocket, isMuted, state.producers.audio]);
 
   // Use a ref to hold the consumers map
   const consumersRef = useRef<Map<string, Consumer<ConsumerAppData>>>(
     new Map()
   );
+
+  // Use a ref to hold the producers map
+  const producersRef = useRef<Map<string, Producer>>(new Map());
 
   const handleError = useCallback(
     (e: Error, message?: string) => {
@@ -75,30 +98,32 @@ const useMeeting = (userId: string, meetingId: string) => {
 
   const setupSocket = useCallback(
     (userId: string, meetingId: string) => {
-      const socket = io(SOCKET_SERVER_URL, {
+      const newSocket = io(SOCKET_SERVER_URL, {
         query: {
           meetingId,
           userId,
         },
       });
 
-      socket.on("connect", () => {
-        socket.emit("meeting:join");
+      setSocket(newSocket);
+
+      newSocket.on("connect", () => {
+        newSocket.emit("meeting:join");
       });
 
-      socket.on("meeting:new-client-join", () => {
+      newSocket.on("meeting:new-client-join", () => {
         toast({ title: "New client has joined the meeting" });
       });
 
-      socket.on("disconnect", (reason) => {
+      newSocket.on("disconnect", (reason) => {
         toast({ title: "Disconnected", description: reason });
       });
 
-      socket.on("reconnect", (attemptNumber) => {
+      newSocket.on("reconnect", (attemptNumber) => {
         toast({ title: `Reconnected after ${attemptNumber} attemps` });
       });
 
-      socket.on("reconnecting", (attemptNumber) => {
+      newSocket.on("reconnecting", (attemptNumber) => {
         toast({
           title: "Attempting to reconnect",
           description: `Attempt ${attemptNumber}`,
@@ -106,11 +131,11 @@ const useMeeting = (userId: string, meetingId: string) => {
         setState((prev) => ({ ...prev, isReconnecting: true }));
       });
 
-      socket.on("error", (error) => {
+      newSocket.on("error", (error) => {
         handleError(error, "Connection error");
       });
 
-      return socket;
+      return newSocket;
     },
     [toast, handleError]
   );
@@ -280,10 +305,10 @@ const useMeeting = (userId: string, meetingId: string) => {
         }
 
         setState((prev) => {
-          const updatedProducers = new Map(prev.producers);
+          const updatedProducers = { ...prev.producers };
 
           for (const producer of producers) {
-            updatedProducers.set(producer.id, producer);
+            updatedProducers[producer.kind] = producer;
           }
 
           return { ...prev, producers: updatedProducers };
@@ -296,16 +321,18 @@ const useMeeting = (userId: string, meetingId: string) => {
         }
       }
 
-      socket.on("meeting:producer-transport-close", (producerId: string) => {
-        const producer = state.producers.get(producerId);
+      const handleClose = (producerId: string) => {
+        const producer = producersRef.current.get(producerId);
         if (!producer) {
           return;
         }
 
         producer.close();
-      });
+      };
+
+      socket.on("meeting:producer-transport-close", handleClose);
     },
-    [handleError, state.producers]
+    [handleError]
   );
 
   const setupConsumers = useCallback(
@@ -362,7 +389,6 @@ const useMeeting = (userId: string, meetingId: string) => {
           return;
         }
 
-        console.log(`Closing consumer ${consumer.id}`);
         consumer.close();
         consumersRef.current.delete(producerId);
 
@@ -394,7 +420,29 @@ const useMeeting = (userId: string, meetingId: string) => {
         });
       };
 
+      const handlePause = (producerId: string) => {
+        const consumer = consumersRef.current.get(producerId);
+        console.log("PAUSE", consumer);
+        if (!consumer) {
+          return;
+        }
+
+        consumer.pause();
+      };
+
+      const handleResume = (producerId: string) => {
+        const consumer = consumersRef.current.get(producerId);
+        console.log("RESUME", consumer);
+        if (!consumer) {
+          return;
+        }
+
+        consumer.resume();
+      };
+
       socket.on("meeting:new-consumer", handleNewConsumer);
+      socket.on("meeting:consumer-pause", handlePause);
+      socket.on("meeting:consumer-resume", handleResume);
       socket.on("meeting:producer-close", handleClose);
       socket.on("meeting:consumer-transport-close", handleClose);
 
@@ -409,7 +457,6 @@ const useMeeting = (userId: string, meetingId: string) => {
 
     const device = new Device();
     setState((prev) => ({ ...prev, device }));
-
     loadDevice(socket, device);
 
     if (!mediaStream) {
@@ -446,6 +493,7 @@ const useMeeting = (userId: string, meetingId: string) => {
       try {
         await initializeProducers();
         await initializeConsumers();
+
         setState((prev) => ({ ...prev, isReconnecting: false }));
       } catch (e) {
         if (e instanceof Error) {
@@ -465,37 +513,59 @@ const useMeeting = (userId: string, meetingId: string) => {
     });
 
     return () => {
-      console.log("Cleaning up useMeeting hook");
-
       (async () => {
         const left = await socket.emitWithAck("meeting:leave");
 
         if (left) {
-          // Disconnect the socket *before* removing event listeners
-          // socket.disconnect();
-          //
-          // socket.off("meeting:establish-conn");
-          // socket.off("meeting:rtp-capabilities");
-          // socket.off("meeting:initialize-consumer");
-          // socket.off("meeting:new-consumer");
-          // socket.off("meeting:producer-close");
-          // socket.off("meeting:consumer-transport-close");
-          // socket.off("meeting:producer-transport-close");
-          // socket.off("meeting:new-client-join");
-          // socket.off("meeting:client-disconnect");
-          // socket.off("connect");
-          // socket.off("disconnect");
-          // socket.off("reconnect");
-          // socket.off("reconnecting");
-          // socket.off("error");
+          socket.disconnect();
+
+          socket.off("meeting:establish-conn");
+          socket.off("meeting:rtp-capabilities");
+          socket.off("meeting:initialize-consumer");
+          socket.off("meeting:new-consumer");
+          socket.off("meeting:consumer-pause");
+          socket.off("meeting:consumer-resume");
+          socket.off("meeting:producer-close");
+          socket.off("meeting:producer-pause");
+          socket.off("meeting:producer-resume");
+          socket.off("meeting:consumer-transport-close");
+          socket.off("meeting:producer-transport-close");
+          socket.off("meeting:new-client-join");
+          socket.off("meeting:client-disconnect");
+          socket.off("connect");
+          socket.off("disconnect");
+          socket.off("reconnect");
+          socket.off("reconnecting");
+          socket.off("error");
         }
+
+        // Reset the state
+        setState({
+          device: null,
+          producers: {},
+          consumers: new Map<string, Client>(),
+          send: {
+            connected: false,
+            transport: null,
+          },
+          receive: {
+            connected: false,
+            transport: null,
+          },
+          isConnected: false,
+          isReconnecting: false,
+        });
       })();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  console.log("PRODUCERS:", state.producers);
+  console.log("PRODUCERS", state.producers);
+  console.log("CONSUMERS", state.consumers);
 
   return {
+    toggleAudioProducer,
+    producers: state.producers,
     clients: state.consumers,
     error,
     isConnected: state.isConnected,
@@ -503,4 +573,4 @@ const useMeeting = (userId: string, meetingId: string) => {
   };
 };
 
-export default useMeeting;
+export default useMediaSoup;

@@ -1,4 +1,4 @@
-import { Consumer } from "mediasoup-client/lib/types";
+import { Consumer, Producer } from "mediasoup-client/lib/types";
 import { ConsumerAppData } from "types/media-soup";
 
 export interface Client {

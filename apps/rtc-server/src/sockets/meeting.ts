@@ -9,6 +9,7 @@ export const meetings = new Map<string, Meeting>();
 
 export const meetingHandler = async (io: Server, socket: Socket) => {
   const meetingId = socket.handshake.query.meetingId as string;
+  await socket.join(meetingId);
 
   // Current socket user's id.
   const userId = socket.handshake.query.userId as string;
@@ -17,7 +18,7 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
 
   const onJoinMeeting = async () => {
     // Joins the room of sockets related to that meeting
-    socket.join(meetingId);
+    console.log("SM1 JOINED");
 
     // Notify all clients that a new client has joined
     socket.to(meetingId).emit("meeting:new-client-join");
@@ -28,17 +29,13 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
     );
 
     // Add the new client that just has joined
-    meeting.addClient(userId, deviceRtpCaps, socket);
+    meeting.addClient(userId, meetingId, deviceRtpCaps, socket, io);
 
     socket.emit("meeting:establish-conn");
   };
 
   const leaveMeeting = async () => {
-    console.log("SOMEONE LEFT");
     await meeting.cleanup(userId);
-
-    // Notify other clients about the disconnection
-    socket.to(meetingId).emit("meeting:client-disconnect", userId);
   };
 
   socket.on("meeting:join", onJoinMeeting);
@@ -46,13 +43,21 @@ export const meetingHandler = async (io: Server, socket: Socket) => {
   // Leave meeting manually or on disconnect
   socket.on("meeting:leave", async (ack: (left: boolean) => void) => {
     try {
+      console.log("SOMEONE IS LEAVING");
       await leaveMeeting();
       ack(true);
     } catch {
       ack(false);
     }
   });
-  socket.on("disconnect", leaveMeeting);
+
+  socket.on("disconnect", async () => {
+    console.log(userId, "Disconnect");
+    await leaveMeeting();
+
+    // Notify other clients about the disconnection
+    socket.to(meetingId).emit("meeting:client-disconnect", userId);
+  });
 };
 
 /**

@@ -5,7 +5,7 @@ interface ChatProps {
 }
 
 const Chat = ({ className }: ChatProps) => {
-  return <div className={cn("", className)}>Chat</div>;
+  return <div className={cn("p-4 border rounded-lg", className)}>Chat</div>;
 };
 
 export default Chat;

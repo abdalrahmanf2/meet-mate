@@ -13,6 +13,7 @@ const Stream = ({ track, kind }: StreamProps) => {
     let mediaStream: MediaStream | null = null;
     const video = videoRef.current;
     const audio = audioRef.current;
+
     console.log("Track Info:", {
       kind: track.kind,
       readyState: track.readyState,
@@ -25,7 +26,6 @@ const Stream = ({ track, kind }: StreamProps) => {
       mediaStream = new MediaStream([track]);
 
       if (kind === "video" && video) {
-        console.log("VIDEO OUT");
         video.srcObject = mediaStream;
       } else if (kind === "audio" && audio) {
         audio.srcObject = mediaStream;
@@ -38,11 +38,9 @@ const Stream = ({ track, kind }: StreamProps) => {
       if (video && kind === "video") {
         video.srcObject = null;
       }
+
       if (audio && kind === "audio") {
         audio.srcObject = null;
-      }
-      if (mediaStream) {
-        mediaStream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [track, kind]);
@@ -50,10 +48,13 @@ const Stream = ({ track, kind }: StreamProps) => {
   return (
     <>
       {kind === "video" ? (
-        <>
-          <p>video</p>
-          <video ref={videoRef} autoPlay playsInline muted={false} />
-        </>
+        <video
+          className="size-full object-cover"
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={false}
+        />
       ) : (
         <audio ref={audioRef} autoPlay playsInline muted={false} />
       )}

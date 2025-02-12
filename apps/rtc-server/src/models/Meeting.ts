@@ -1,7 +1,7 @@
 import type { Router } from "mediasoup/node/lib/RouterTypes.js";
 import Client from "./Client.ts";
 import type { RouterAppData, WorkerAppData } from "../types/media-types.ts";
-import type { Socket } from "socket.io";
+import type { Server, Socket } from "socket.io";
 import type { TransportOptions } from "mediasoup-client/lib/types.js";
 import type {
   RtpCapabilities,
@@ -28,8 +28,24 @@ class Meeting {
     this.clients = new Map();
   }
 
-  addClient(userId: string, deviceRtpCaps: RtpCapabilities, socket: Socket) {
-    const client = new Client(userId, deviceRtpCaps, socket, this.router);
+  addClient(
+    userId: string,
+    meetingId: string,
+    deviceRtpCaps: RtpCapabilities,
+    socket: Socket,
+    io: Server
+  ) {
+    const client = new Client(
+      userId,
+      meetingId,
+      deviceRtpCaps,
+      socket,
+      io,
+      this.router
+    );
+
+    // add the new client to the clients map.
+    this.clients.set(userId, client);
 
     // Setup the transports
     socket.on(
@@ -104,9 +120,6 @@ class Meeting {
       try {
         await client.initializeConsumers([...this.clients.values()]);
 
-        // add the new client to the clients map.
-        this.clients.set(userId, client);
-
         console.log(`Clients count: ${this.clients.size}`);
       } catch (error) {
         console.error("Error initializing consumers:", error);
@@ -134,6 +147,7 @@ class Meeting {
   async cleanup(userId: string) {
     const client = this.getClient(userId);
     if (!client) return;
+    console.log("CLIENT", client?.userId);
 
     try {
       // Close Transports
